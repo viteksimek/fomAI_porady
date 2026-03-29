@@ -11,6 +11,9 @@
 
 set -euo pipefail
 
+# Změňte při úpravách — při curl ověřte: curl -sL ... | head -5 musí obsahovat stejný řetězec
+echo "==> setup_existing_cloudrun.sh  rev: 2026-03-29b  (IAM: --condition=None)"
+
 PROJECT_ID="${1:-}"
 SERVICE_NAME="${2:-}"
 REGION="${3:-${REGION:-europe-west1}}"
@@ -66,11 +69,8 @@ grant_roles() {
   local sa="$1"
   echo "==> IAM role pro $sa …"
   for R in roles/aiplatform.user roles/datastore.user roles/storage.objectAdmin roles/cloudtasks.enqueuer; do
-    gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-      --member="serviceAccount:${sa}" \
-      --role="$R" \
-      --condition=None \
-      --quiet
+    # Jedna řádka — některé prostředí špatně zpracovávají pokračování řádků u --condition=None
+    gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:${sa}" --role="$R" --condition=None --quiet
   done
   echo "==> Signed URL: TokenCreator pro vlastní účet…"
   gcloud iam service-accounts add-iam-policy-binding "$sa" \

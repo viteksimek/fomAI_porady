@@ -29,6 +29,20 @@ chmod +x scripts/setup_existing_cloudrun.sh
 
 Argumenty: `PROJECT_ID`, **název služby Cloud Run** (jak v konzoli), volitelně region. Skript zapne API, založí bucket `PROJECT_ID-meeting-audio` (nebo `BUCKET_NAME=…` před spuštěním), zkusí Firestore, **najde účet**, pod kterým služba běží, přidá mu role (Vertex, Firestore, Storage, …) a **doplní env** na službě (`GCS_BUCKET`, `USE_MEMORY_STORE=false`, …).
 
+**Cache u `curl`:** pokud stále hlásí chybu o `--condition=None`, ověřte `curl -sL 'https://raw.githubusercontent.com/.../setup_existing_cloudrun.sh?x=1' | head -5` — musí být řádek `rev: 2026-03-29b`. Jinak přidejte `?t=$(date +%s)` do URL.
+
+**Ruční IAM** (stejné role jako skript), když skript nelze spustit:
+
+```bash
+export PROJECT_ID=fomei2020
+export RUN_SA=635664358681-compute@developer.gserviceaccount.com   # váš účet z výpisu skriptu
+for R in roles/aiplatform.user roles/datastore.user roles/storage.objectAdmin roles/cloudtasks.enqueuer; do
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:${RUN_SA}" --role="$R" --condition=None --quiet
+done
+```
+
+Pak dokončete env na Cloud Run (viz skript, sekce `gcloud run services update` / zkopírujte z aktuálního `setup_existing_cloudrun.sh` na GitHubu).
+
 ### Rychlá příprava skriptem (kroky 1–3 najednou)
 
 Ze **kořene repozitáře** (s `Dockerfile`), po `gcloud auth login` a zapnuté fakturaci:
