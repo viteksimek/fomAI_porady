@@ -1,0 +1,146 @@
+# Cloud Run — nejjednodušší nasazení
+
+Dvě úrovně: **A) bez Cloud Tasks** (méně kroků, vhodné na začátek) a **B) s Cloud Tasks** (odpovídá plánu, robustnější).
+
+## Předpoklady
+
+- [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) (`gcloud`)
+- Projekt GCP s fakturací
+- Tento repozitář na disku (kořen s `Dockerfile`)
+
+Proměnné (upravte):
+
+```bash
+export PROJECT_ID="váš-projekt-id"
+export REGION="europe-west1"
+export SERVICE_NAME="meeting-api"
+export BUCKET_NAME="${PROJECT_ID}-meeting-audio"
+export AR_REPO="meeting-api"
+```
+
+---
+
+## Krok 1 — API a bucket (jednou)
+
+```bash
+gcloud config set project "$PROJECT_ID"
+
+gcloud services enable \
+  run.googleapis.com \
+  artifactregistry.googleapis.com \
+  storage.googleapis.com \
+  firestore.googleapis.com \
+  aiplatform.googleapis.com
+
+gsutil mb -l "$REGION" "gs://${BUCKET_NAME}" 2>/dev/null || true
+
+gcloud artifacts repositories create "$AR_REPO" \
+  --repository-format=docker \
+  --location="$REGION" \
+  --description="Meeting API" 2>/dev/null || true
+```
+
+## Krok 2 — Firestore (jednou)
+
+V [konzoli Firestore](https://console.cloud.google.com/firestore) vytvořte databázi v **Native** režimu, region např. `europe-west1`.
+
+## Krok 3 — Služební účet pro Cloud Run (jednou)
+
+```bash
+gcloud iam service-accounts create meeting-api-run \
+  --display-name="Meeting API Cloud Run" 2>/dev/null || true
+
+SA_EMAIL="meeting-api-run@${PROJECT_ID}.iam.gserviceaccount.com"
+
+for R in roles/aiplatform.user roles/datastore.user roles/storage.objectAdmin; do
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:${SA_EMAIL}" --role="$R" --quiet
+done
+```
+
+Podepisování **signed URL** (volitelné endpointy): přidejte účtu roli `roles/iam.serviceAccountTokenCreator` na sebe (běžný vzor pro V4 URL):
+
+```bash
+gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
+  --member="serviceAccount:${SA_EMAIL}" \
+  --role="roles/iam.serviceAccountTokenCreator" --quiet
+```
+
+---
+
+## Varianta A — nejméně kroků (bez Cloud Tasks)
+
+Zpracování běží na instanci Cloud Run na pozadí (`PROCESS_INLINE=true`). Není potřeba fronta ani druhý účet pro OIDC.
+
+Z kořene repozitáře:
+
+```bash
+IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE_NAME}:$(date +%Y%m%d-%H%M)"
+
+gcloud builds submit --tag "$IMAGE" .
+
+gcloud run deploy "$SERVICE_NAME" \
+  --image "$IMAGE" \
+  --region "$REGION" \
+  --platform managed \
+  --allow-unauthenticated \
+  --port 8080 \
+  --memory 2Gi \
+  --cpu 2 \
+  --timeout 3600 \
+  --service-account "$SA_EMAIL" \
+  --set-env-vars "\
+GOOGLE_CLOUD_PROJECT=${PROJECT_ID},\
+GCS_BUCKET=${BUCKET_NAME},\
+MODEL_REGION=${REGION},\
+USE_MEMORY_STORE=false,\
+PROCESS_INLINE=true,\
+SKIP_INTERNAL_OIDC=true"
+```
+
+Po deployi zkopírujte URL služby z výstupu a otestujte:
+
+```bash
+curl -sS "https://YOUR-SERVICE-XXXX.run.app/health"
+```
+
+Hlavička `X-API-Key` jen pokud v konzoli Cloud Run doplníte proměnnou `API_KEY`.
+
+---
+
+## Varianta B — s Cloud Tasks (dle plánu)
+
+1. Dokončete sekci **6** v [GCP_SETUP.md](GCP_SETUP.md) (fronta `meeting-jobs`, účet `cloud-tasks-invoker`, `roles/run.invoker` na službě).
+2. Deploy stejný image jako v A, ale env např.:
+
+```text
+PROCESS_INLINE=false
+SKIP_INTERNAL_OIDC=false
+CLOUD_RUN_SERVICE_URL=https://YOUR-SERVICE-XXXX.run.app
+CLOUD_TASKS_LOCATION=europe-west1
+CLOUD_TASKS_QUEUE=meeting-jobs
+CLOUD_TASKS_INVOKER_SA=cloud-tasks-invoker@PROJECT_ID.iam.gserviceaccount.com
+```
+
+A runtime účtu přidejte `roles/cloudtasks.enqueuer` (viz [GCP_SETUP.md](GCP_SETUP.md)).
+
+---
+
+## Git → automatický build
+
+Zdrojový kód: [https://github.com/viteksimek/fomAI_porady](https://github.com/viteksimek/fomAI_porady).
+
+Propojte repo s [Cloud Build Triggers](https://console.cloud.google.com/cloud-build/triggers) a použijte [cloudbuild.yaml](../cloudbuild.yaml). Po prvním deployi v konzoli **Cloud Run → vaše služba → Upravit a nasadit novou revizi** doplňte chybějící env (`GCS_BUCKET`, atd.) — šablona v `cloudbuild.yaml` nastavuje jen minimum.
+
+---
+
+## Časté problémy
+
+| Problém | Řešení |
+|--------|--------|
+| Vertex „permission denied“ | Účet `meeting-api-run` má `roles/aiplatform.user`; region `MODEL_REGION` odpovídá dostupnosti modelu. |
+| GCS access denied | `roles/storage.objectAdmin` na projekt nebo užší role na bucket. |
+| Firestore | `USE_MEMORY_STORE=false` a vytvořená Firestore DB. |
+| Timeout | U dlouhých nahrávek už máte `--timeout 3600`; případně zvyšte paměť. |
+
+Podrobnosti rolí a OIDC: [GCP_SETUP.md](GCP_SETUP.md).

@@ -1,0 +1,73 @@
+# Connect repo in Cloud Build triggers: https://cloud.google.com/build/docs/automating-builds/create-github-app-triggers
+#
+# Required secrets/substitutions (Trigger or cloudbuild):
+#   _REGION: europe-west1 (Vertex + Run + Tasks region)
+#   _AR_REPOSITORY: meeting-api (Artifact Registry docker repo)
+#   _SERVICE_NAME: meeting-api
+#
+# After first deploy, set Cloud Run service env vars (see docs/GCP_SETUP.md).
+
+substitutions:
+  _REGION: europe-west1
+  _AR_REPOSITORY: meeting-api
+  _SERVICE_NAME: meeting-api
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  - id: build-image
+    name: gcr.io/cloud-builders/docker
+    args:
+      [
+        "build",
+        "-t",
+        "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA",
+        "-t",
+        "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_SERVICE_NAME}:latest",
+        ".",
+      ]
+
+  - id: push-image
+    name: gcr.io/cloud-builders/docker
+    args:
+      [
+        "push",
+        "--all-tags",
+        "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_SERVICE_NAME}",
+      ]
+
+  - id: deploy-cloud-run
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      [
+        "run",
+        "deploy",
+        "${_SERVICE_NAME}",
+        "--image",
+        "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA",
+        "--region",
+        "${_REGION}",
+        "--platform",
+        "managed",
+        "--allow-unauthenticated",
+        "--port",
+        "8080",
+        "--memory",
+        "2Gi",
+        "--cpu",
+        "2",
+        "--timeout",
+        "3600",
+        "--max-instances",
+        "10",
+        "--set-env-vars",
+        "GOOGLE_CLOUD_PROJECT=$PROJECT_ID,PROCESS_INLINE=false",
+        # Add service account with Vertex + GCS + Firestore + Cloud Tasks enqueuer roles:
+        # "--service-account", "${_SERVICE_NAME}@${PROJECT_ID}.iam.gserviceaccount.com",
+      ]
+
+images:
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_SERVICE_NAME}:$SHORT_SHA"
+  - "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_SERVICE_NAME}:latest"
