@@ -18,6 +18,28 @@ export BUCKET_NAME="${PROJECT_ID}-meeting-audio"
 export AR_REPO="meeting-api"
 ```
 
+### Už máte Cloud Run, chybí bucket / Firestore / IAM / env?
+
+V **Cloud Shell** (nebo kde máte `gcloud` s právy na projekt), z kořene klonovaného repa:
+
+```bash
+chmod +x scripts/setup_existing_cloudrun.sh
+./scripts/setup_existing_cloudrun.sh fomei2020 fomai-porady europe-west1
+```
+
+Argumenty: `PROJECT_ID`, **název služby Cloud Run** (jak v konzoli), volitelně region. Skript zapne API, založí bucket `PROJECT_ID-meeting-audio` (nebo `BUCKET_NAME=…` před spuštěním), zkusí Firestore, **najde účet**, pod kterým služba běží, přidá mu role (Vertex, Firestore, Storage, …) a **doplní env** na službě (`GCS_BUCKET`, `USE_MEMORY_STORE=false`, …).
+
+### Rychlá příprava skriptem (kroky 1–3 najednou)
+
+Ze **kořene repozitáře** (s `Dockerfile`), po `gcloud auth login` a zapnuté fakturaci:
+
+```bash
+chmod +x scripts/bootstrap_gcp.sh
+./scripts/bootstrap_gcp.sh "$PROJECT_ID"
+```
+
+Skript zapne API, vytvoří bucket, Artifact Registry, runtime účet, role, Firestore (Native) a zkusí frontu `meeting-jobs`. Na konci vypíše příkazy pro `gcloud builds submit` a `gcloud run deploy`.
+
 ---
 
 ## Krok 1 — API a bucket (jednou)
