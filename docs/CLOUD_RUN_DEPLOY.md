@@ -170,6 +170,15 @@ Propojte repo s [Cloud Build Triggers](https://console.cloud.google.com/cloud-bu
 
 ---
 
+## Velké soubory (nad ~32 MB) a dlouhé nahrávky
+
+**Cloud Run** má limit **cca 32 MB na jeden přímý HTTP POST** na `/v1/jobs/upload`. Větší soubory používejte:
+
+1. **`POST /v1/uploads/signed-url`** → dostanete `upload_url` (resumable session) → **PUT** celého souboru na tuto URL → **`POST .../finalize-upload`**. Tím obcházíte limit Cloud Run (upload jde přímo do GCS).
+2. Nebo nahrajte soubor do bucketu (`gcloud storage cp` / klient) a zavolejte **`POST /v1/jobs`** s `gs://...`.
+
+V **Cloud Shellu** neexistuje tvůj Mac **`~/Desktop`** — nejdřív soubor nahraj přes menu **⋮ → Upload** do domovského adresáře, pak např. `gcloud storage cp ~/SLS.m4a gs://...`.
+
 ## Časté problémy
 
 | Problém | Řešení |

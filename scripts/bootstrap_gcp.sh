@@ -34,6 +34,7 @@ gcloud services enable \
   firestore.googleapis.com \
   cloudtasks.googleapis.com \
   aiplatform.googleapis.com \
+  iamcredentials.googleapis.com \
   --quiet
 
 echo "==> GCS bucket: gs://${BUCKET_NAME}"

@@ -36,6 +36,7 @@ gcloud services enable \
   aiplatform.googleapis.com \
   cloudbuild.googleapis.com \
   artifactregistry.googleapis.com \
+  iamcredentials.googleapis.com \
   --quiet
 
 echo "==> Bucket: gs://${BUCKET_NAME}"

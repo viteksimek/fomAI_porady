@@ -77,19 +77,25 @@ class GcsStorage:
         content_type: str,
         expiration_seconds: int,
     ) -> str:
+        """Velké soubory: resumable session URL (server vytvoří session přes API — bez V4 signBlob).
+
+        Klient pošle celý soubor jedním PUT na vrácenou URL (funguje i pro desítky MB).
+
+        Parametr expiration_seconds zachovává kontrakt API; u resumable session platí TTL po straně GCS.
+        """
+        _ = expiration_seconds
         bucket_name, blob_name = parse_gs_uri(gcs_uri)
 
-        def _url() -> str:
+        def _session_url() -> str:
             b = self._require_client().bucket(bucket_name)
             blob = b.blob(blob_name)
-            return blob.generate_signed_url(
-                version="v4",
-                expiration=timedelta(seconds=expiration_seconds),
-                method="PUT",
+            # Resumable upload session — spolehlivější na Cloud Run než generate_signed_url (IAM signBlob).
+            return blob.create_resumable_upload_session(
                 content_type=content_type,
+                size=None,
             )
 
-        return await asyncio.to_thread(_url)
+        return await asyncio.to_thread(_session_url)
 
     async def generate_download_signed_url(
         self,
