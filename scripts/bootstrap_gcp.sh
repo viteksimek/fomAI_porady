@@ -66,6 +66,7 @@ for R in roles/aiplatform.user roles/datastore.user roles/storage.objectAdmin ro
   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:${SA_EMAIL}" \
     --role="$R" \
+    --condition=None \
     --quiet
 done
 

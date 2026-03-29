@@ -69,6 +69,7 @@ grant_roles() {
     gcloud projects add-iam-policy-binding "$PROJECT_ID" \
       --member="serviceAccount:${sa}" \
       --role="$R" \
+      --condition=None \
       --quiet
   done
   echo "==> Signed URL: TokenCreator pro vlastní účet…"
