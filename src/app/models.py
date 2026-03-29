@@ -35,14 +35,34 @@ class JobAcceptedResponse(BaseModel):
 class SignedUploadBody(BaseModel):
     filename: str = "recording.m4a"
     content_type: str = "application/octet-stream"
+    options: JobOptions | None = Field(
+        default=None,
+        description="Stejné jako u POST /v1/jobs — language_hint atd.",
+    )
 
 
-class SignedUploadResponse(BaseModel):
+class PrepareUploadResponse(BaseModel):
+    """Výsledek přípravy nahrání — vždy použijte tento tok pro spolehlivé zpracování libovolné velikosti."""
+
     job_id: str
     gcs_uri: str
     upload_url: str
     expires_in_seconds: int
     finalize_url: str
+    status_url: str
+    flow: str = "put_then_finalize"
+    steps: list[str] = Field(
+        default_factory=lambda: [
+            "PUT: celý soubor jako raw body na upload_url (hlavička Content-Type musí odpovídat přípravě).",
+            "POST: finalize_url bez těla (stejná base URL / autentizace jako ostatní /v1).",
+            "GET: status_url dokud status není completed nebo failed.",
+        ],
+    )
+
+
+# Zpětná kompatibilita — stejné pole jako dřív; nové klienty používají PrepareUploadResponse.
+class SignedUploadResponse(PrepareUploadResponse):
+    pass
 
 
 class JobDetailResponse(BaseModel):
@@ -67,6 +87,18 @@ class TaskProcessBody(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     version: str
+
+
+class MetaResponse(BaseModel):
+    """Jednotné informace pro klienty — nemusíte řešit limity ručně."""
+
+    version: str
+    upload_max_direct_multipart_mb: int = 32
+    upload_recommended_path: str = "/v1/jobs/prepare-upload"
+    note: str = (
+        "Pro libovolně velké soubory vždy: prepare-upload → PUT na upload_url → POST finalize. "
+        "Přímý multipart POST /v1/jobs/upload je vhodný jen pro malé soubory (pod limitem)."
+    )
 
 
 def utc_now_iso() -> str:

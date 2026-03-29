@@ -17,10 +17,12 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
 ```
 
 - `GET /health` — kontrola běhu
-- `POST /v1/jobs` — JSON `{ "source": { "gcs_uri": "gs://..." }, "options": { "language_hint": "cs" } }`
-- `POST /v1/jobs/upload` — `multipart/form-data` pole `file`, volitelně `options` (JSON string)
+- `GET /v1/meta` — limity a doporučený tok (bez hardcodování u klienta)
+- **`POST /v1/jobs/prepare-upload`** — doporučený vstup pro **libovolnou velikost**: dostanete `upload_url` → **PUT** souboru → **POST** `finalize_url` → **GET** `status_url` (viz pole `steps` v odpovědi)
+- `POST /v1/jobs` — soubor už v GCS: `{ "source": { "gcs_uri": "gs://..." }, "options": { "language_hint": "cs" } }`
+- `POST /v1/jobs/upload` — jen **malé** soubory (řádově pod cca 32 MB); větší vždy přes **prepare-upload** nebo `gs://`
 - `GET /v1/jobs/{id}?include_signed_urls=true`
-- Volitelně `POST /v1/uploads/signed-url` pak `POST /v1/jobs/{id}/finalize-upload`
+- `POST /v1/uploads/signed-url` — totéž co `prepare-upload` (zpětná kompatibilita)
 
 Hlavička `X-API-Key` pokud je nastaveno `API_KEY`.
 

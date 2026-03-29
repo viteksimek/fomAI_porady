@@ -16,6 +16,8 @@ from app.models import (
     JobDetailResponse,
     JobOptions,
     JobStatus,
+    MetaResponse,
+    PrepareUploadResponse,
     SignedUploadBody,
     SignedUploadResponse,
     TaskProcessBody,
@@ -49,6 +51,45 @@ def _kickoff_processing(background_tasks: BackgroundTasks, job_id: str) -> None:
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(status="ok", version=__version__)
+
+
+@app.get("/v1/meta", response_model=MetaResponse, tags=["v1"])
+async def api_meta() -> MetaResponse:
+    """Jednotný popis limitů a doporučeného toku — klienti nemusí limity hardcodovat."""
+    return MetaResponse(version=__version__)
+
+
+async def _prepare_upload(request: Request, body: SignedUploadBody) -> PrepareUploadResponse:
+    settings = get_settings()
+    if not settings.gcs_bucket or not settings.google_cloud_project:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="GCS not configured",
+        )
+    store = get_jobs_store_resolved()
+    gcs = GcsStorage()
+    opts = (body.options or JobOptions()).model_dump()
+    job_id = await store.create_job(
+        status=JobStatus.pending_upload,
+        input_gcs_uri=None,
+        options=opts,
+    )
+    dest_uri = gcs.job_input_uri(job_id, body.filename)
+    upload_url = await gcs.generate_upload_signed_url(
+        gcs_uri=dest_uri,
+        content_type=body.content_type,
+        expiration_seconds=settings.signed_url_exp_seconds,
+    )
+    await store.update_job(job_id, {"input_gcs_uri": dest_uri})
+    base = str(request.base_url).rstrip("/")
+    return PrepareUploadResponse(
+        job_id=job_id,
+        gcs_uri=dest_uri,
+        upload_url=upload_url,
+        expires_in_seconds=settings.signed_url_exp_seconds,
+        finalize_url=f"{base}/v1/jobs/{job_id}/finalize-upload",
+        status_url=f"{base}/v1/jobs/{job_id}",
+    )
 
 
 @app.post(
@@ -140,44 +181,33 @@ async def create_job_from_upload(
 
 
 @app.post(
+    "/v1/jobs/prepare-upload",
+    response_model=PrepareUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_api_key)],
+    tags=["v1"],
+)
+async def prepare_upload(
+    body: SignedUploadBody,
+    request: Request,
+) -> PrepareUploadResponse:
+    """Doporučený vstup pro libovolnou velikost: PUT na upload_url → POST finalize → GET status."""
+    return await _prepare_upload(request, body)
+
+
+@app.post(
     "/v1/uploads/signed-url",
     response_model=SignedUploadResponse,
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_api_key)],
+    tags=["v1"],
 )
 async def create_signed_upload(
     body: SignedUploadBody,
     request: Request,
-) -> SignedUploadResponse:
-    settings = get_settings()
-    if not settings.gcs_bucket or not settings.google_cloud_project:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="GCS not configured",
-        )
-    store = get_jobs_store_resolved()
-    gcs = GcsStorage()
-
-    job_id = await store.create_job(
-        status=JobStatus.pending_upload,
-        input_gcs_uri=None,
-        options=JobOptions().model_dump(),
-    )
-    dest_uri = gcs.job_input_uri(job_id, body.filename)
-    upload_url = await gcs.generate_upload_signed_url(
-        gcs_uri=dest_uri,
-        content_type=body.content_type,
-        expiration_seconds=settings.signed_url_exp_seconds,
-    )
-    await store.update_job(job_id, {"input_gcs_uri": dest_uri})
-    base = str(request.base_url).rstrip("/")
-    return SignedUploadResponse(
-        job_id=job_id,
-        gcs_uri=dest_uri,
-        upload_url=upload_url,
-        expires_in_seconds=settings.signed_url_exp_seconds,
-        finalize_url=f"{base}/v1/jobs/{job_id}/finalize-upload",
-    )
+) -> PrepareUploadResponse:
+    """Zpětná kompatibilita — totéž co POST /v1/jobs/prepare-upload."""
+    return await _prepare_upload(request, body)
 
 
 @app.post(

@@ -170,14 +170,22 @@ Propojte repo s [Cloud Build Triggers](https://console.cloud.google.com/cloud-bu
 
 ---
 
-## Velké soubory (nad ~32 MB) a dlouhé nahrávky
+## Velké soubory a automatizace (doporučený jednotný tok)
 
-**Cloud Run** má limit **cca 32 MB na jeden přímý HTTP POST** na `/v1/jobs/upload`. Větší soubory používejte:
+**Nepřemýšlejte o limitech ručně** — klient si může vždy vyžádat `GET /v1/meta` (limity + doporučená cesta).
 
-1. **`POST /v1/uploads/signed-url`** → dostanete `upload_url` (resumable session) → **PUT** celého souboru na tuto URL → **`POST .../finalize-upload`**. Tím obcházíte limit Cloud Run (upload jde přímo do GCS).
-2. Nebo nahrajte soubor do bucketu (`gcloud storage cp` / klient) a zavolejte **`POST /v1/jobs`** s `gs://...`.
+**Standard pro libovolnou velikost** (Power Automate, skripty, …):
 
-V **Cloud Shellu** neexistuje tvůj Mac **`~/Desktop`** — nejdřív soubor nahraj přes menu **⋮ → Upload** do domovského adresáře, pak např. `gcloud storage cp ~/SLS.m4a gs://...`.
+1. `POST /v1/jobs/prepare-upload` — JSON `filename`, `content_type`, volitelně `options` — odpověď obsahuje `upload_url`, `finalize_url`, `status_url` a pole **`steps`**.
+2. **PUT** raw bajtů souboru na `upload_url` (hlavička `Content-Type` jako v kroku 1).
+3. **POST** na `finalize_url`.
+4. **GET** `status_url` dokud není hotovo.
+
+Starý alias: `POST /v1/uploads/signed-url` dělá totéž.
+
+**Cloud Run** má limit **cca 32 MB** na přímý multipart **`/v1/jobs/upload`** — pro větší soubory používejte výše uvedený tok nebo soubor nejdřív dejte do GCS a **`POST /v1/jobs`** s `gs://...`.
+
+V **Cloud Shellu** není váš Mac **`~/Desktop`** — soubor nejdřív **Upload** do home, pak např. `gcloud storage cp ~/SLS.m4a gs://...`.
 
 ## Časté problémy
 
