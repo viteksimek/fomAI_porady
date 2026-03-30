@@ -15,6 +15,13 @@ class JobStatus(str, Enum):
 
 class JobOptions(BaseModel):
     language_hint: str = Field(default="cs", description="Preferred language for prompts/output")
+    speaker_count: int | None = Field(
+        default=None,
+        ge=1,
+        le=32,
+        description="Očekávaný počet mluvčích (Chirp 3 diarizace, jen u podporovaných jazyků). "
+        "Přepíše odhad z názvu souboru. Bez vyplnění = automatika (nebo hint z názvu).",
+    )
 
 
 class GcsSource(BaseModel):
@@ -98,6 +105,10 @@ class MetaResponse(BaseModel):
     note: str = (
         "Pro libovolně velké soubory vždy: prepare-upload → PUT na upload_url → POST finalize. "
         "Přímý multipart POST /v1/jobs/upload je vhodný jen pro malé soubory (pod limitem)."
+    )
+    speaker_count_hint: str = (
+        "Volitelně počet mluvčích: v JSON options.speaker_count (1–32), nebo v názvu souboru před příponou "
+        "`_sN` (např. porada_s4.m4a) či `_Nmluvcich`. Pole options má přednost. Bez uvedení zůstává automatika."
     )
 
 

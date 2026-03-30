@@ -1,0 +1,172 @@
+swagger: "2.0"
+info:
+  title: Meeting API (zápisy z porad)
+  description: |
+    Import: Power Automate → Data → Custom connectors → New → Import from OpenAPI.
+    Host v tomto souboru směřuje na produkční Cloud Run; po změně URL služby upravte pole host.
+
+    Tento soubor pokrývá volání na vaši službu. Krok PUT souboru na upload_url (Google signed URL)
+    v tomto konektoru není — v toku přidejte samostatnou akci HTTP s metodou PUT, URL = výstup
+    prepareUpload.upload_url a tělo = binární obsah souboru; Content-Type stejný jako v prepare.
+  version: 1.0.0
+host: fomai-porady-635664358681.europe-west1.run.app
+basePath: /
+schemes:
+  - https
+consumes:
+  - application/json
+produces:
+  - application/json
+securityDefinitions:
+  api_key:
+    type: apiKey
+    in: header
+    name: X-API-Key
+security:
+  - api_key: []
+paths:
+  /v1/meta:
+    get:
+      operationId: GetMeta
+      summary: Limity a doporučený upload tok
+      description: Nepotřebuje API klíč, pokud ho API nevyžaduje globálně (ověřte u vaší instance).
+      security: []
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/MetaResponse"
+  /v1/jobs/prepare-upload:
+    post:
+      operationId: PrepareUpload
+      summary: Připraví job a vrátí upload_url, finalize_url, status_url
+      parameters:
+        - name: body
+          in: body
+          required: true
+          schema:
+            $ref: "#/definitions/SignedUploadBody"
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: "#/definitions/PrepareUploadResponse"
+  /v1/jobs/{job_id}/finalize-upload:
+    post:
+      operationId: FinalizeUpload
+      summary: Po úspěšném PUT na upload_url spustí zpracování
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          type: string
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: "#/definitions/JobAcceptedResponse"
+  /v1/jobs/{job_id}:
+    get:
+      operationId: GetJobStatus
+      summary: Stav jobu (polling)
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/JobDetailResponse"
+definitions:
+  JobOptions:
+    type: object
+    properties:
+      language_hint:
+        type: string
+        default: cs
+  SignedUploadBody:
+    type: object
+    required:
+      - filename
+      - content_type
+    properties:
+      filename:
+        type: string
+        example: porada.m4a
+      content_type:
+        type: string
+        description: Musí odpovídat hlavičce při PUT na upload_url
+        example: audio/mp4
+      options:
+        $ref: "#/definitions/JobOptions"
+  PrepareUploadResponse:
+    type: object
+    properties:
+      job_id:
+        type: string
+      gcs_uri:
+        type: string
+      upload_url:
+        type: string
+      expires_in_seconds:
+        type: integer
+      finalize_url:
+        type: string
+      status_url:
+        type: string
+      flow:
+        type: string
+      steps:
+        type: array
+        items:
+          type: string
+  JobAcceptedResponse:
+    type: object
+    properties:
+      job_id:
+        type: string
+      status:
+        type: string
+      status_url:
+        type: string
+  JobDetailResponse:
+    type: object
+    description: Po dokončení mohou být doplněna pole transcript, minutes, download URL
+    properties:
+      job_id:
+        type: string
+      status:
+        type: string
+      created_at:
+        type: string
+      updated_at:
+        type: string
+      input_gcs_uri:
+        type: string
+      transcript_gcs_uri:
+        type: string
+      minutes_gcs_uri:
+        type: string
+      transcript_download_url:
+        type: string
+      minutes_download_url:
+        type: string
+      transcript:
+        type: object
+      minutes:
+        type: object
+      error:
+        type: string
+  MetaResponse:
+    type: object
+    properties:
+      version:
+        type: string
+      upload_max_direct_multipart_mb:
+        type: integer
+      upload_recommended_path:
+        type: string
+      note:
+        type: string

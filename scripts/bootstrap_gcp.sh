@@ -34,6 +34,7 @@ gcloud services enable \
   firestore.googleapis.com \
   cloudtasks.googleapis.com \
   aiplatform.googleapis.com \
+  speech.googleapis.com \
   iamcredentials.googleapis.com \
   --quiet
 
@@ -63,7 +64,7 @@ else
 fi
 
 echo "==> IAM role pro runtime účet…"
-for R in roles/aiplatform.user roles/datastore.user roles/storage.objectAdmin roles/cloudtasks.enqueuer; do
+for R in roles/aiplatform.user roles/datastore.user roles/storage.objectAdmin roles/cloudtasks.enqueuer roles/speech.client; do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:${SA_EMAIL}" \
     --role="$R" \
@@ -116,7 +117,7 @@ echo "    --memory 2Gi \\"
 echo "    --cpu 2 \\"
 echo "    --timeout 3600 \\"
 echo "    --service-account \"\$SA_EMAIL\" \\"
-echo "    --set-env-vars \"GOOGLE_CLOUD_PROJECT=\${PROJECT_ID},GCS_BUCKET=\${BUCKET_NAME},MODEL_REGION=\${REGION},USE_MEMORY_STORE=false,PROCESS_INLINE=true,SKIP_INTERNAL_OIDC=true\""
+echo "    --set-env-vars \"GOOGLE_CLOUD_PROJECT=\${PROJECT_ID},GCS_BUCKET=\${BUCKET_NAME},MODEL_REGION=\${REGION},SPEECH_REGION=eu,TRANSCRIPTION_PROVIDER=chirp_3,USE_MEMORY_STORE=false,PROCESS_INLINE=true,SKIP_INTERNAL_OIDC=true\""
 echo ""
 echo "Po deployi nastavte volitelně API_KEY v Cloud Run → proměnné prostředí."
 echo "Cloud Tasks + OIDC: viz docs/GCP_SETUP.md"

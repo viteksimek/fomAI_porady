@@ -6,6 +6,7 @@ import logging
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import vertexai
 from vertexai.generative_models import GenerationConfig, GenerativeModel, HarmBlockThreshold, HarmCategory, Part
@@ -13,9 +14,23 @@ from vertexai.generative_models import GenerationConfig, GenerativeModel, HarmBl
 from app.jobs_store import get_jobs_store_resolved
 from app.models import JobStatus
 from app.settings import get_settings
+from app.speech_chirp import parse_speaker_count_from_gcs_uri, transcribe_gcs_chirp3
 from app.storage import GcsStorage
 
 logger = logging.getLogger(__name__)
+
+
+def _resolved_speaker_count(options: dict[str, Any], input_gcs_uri: str) -> int | None:
+    """options.speaker_count má přednost; jinak hint z názvu objektu v gs:// (např. *_s3.m4a)."""
+    raw = options.get("speaker_count")
+    if raw is not None:
+        try:
+            n = int(raw)
+        except (TypeError, ValueError):
+            n = -1
+        if 1 <= n <= 32:
+            return n
+    return parse_speaker_count_from_gcs_uri(input_gcs_uri)
 
 TRANSCRIPT_SCHEMA = {
     "type": "object",
@@ -93,6 +108,21 @@ MINUTES_SCHEMA = {
 }
 
 
+def _ffprobe_duration_seconds(path: Path) -> float:
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(path),
+    ]
+    r = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    return float((r.stdout or "0").strip() or 0.0)
+
+
 def _run_ffmpeg_normalize(src: Path, dest: Path) -> None:
     cmd = [
         "ffmpeg",
@@ -168,6 +198,7 @@ async def process_job(job_id: str) -> None:
 
     options = job.get("options") or {}
     lang = (options.get("language_hint") or "cs") or "cs"
+    speaker_hint = _resolved_speaker_count(options, input_uri)
 
     await store.update_job(job_id, {"status": JobStatus.processing.value, "error": None})
 
@@ -192,25 +223,44 @@ async def process_job(job_id: str) -> None:
                 content_type="audio/mpeg",
             )
 
-            transcript_prompt = f"""
+            duration_sec = await asyncio.to_thread(_ffprobe_duration_seconds, norm_path)
+
+            if settings.transcription_provider == "chirp_3":
+                transcript_data = await asyncio.to_thread(
+                    transcribe_gcs_chirp3,
+                    gcs_uri=normalized_uri,
+                    language_hint=lang,
+                    project_id=settings.google_cloud_project,
+                    speech_region=settings.speech_region,
+                    duration_seconds=duration_sec,
+                    speaker_count=speaker_hint,
+                )
+            else:
+                spk_line = ""
+                if speaker_hint is not None:
+                    spk_line = (
+                        f"\nOdhad počtu mluvčích: {speaker_hint}. "
+                        "Sladit pole speaker s audio podle tohoto odhadu, pokud to dává smysl.\n"
+                    )
+                transcript_prompt = f"""
 Jsi profesionální přepisovatel porad v jazyce {lang}.
 Úkol: přepiš audio přesně, včetně časových značek a rozlišení mluvčích (pokud lze odhadnout z audio).
-Odpověz výhradně JSON podle schématu. Veškeré textové položky piš česky, pokud audio není v češtině — přesto přepis věrný originálu v poli text, summary může být česky.
+{spk_line}Odpověz výhradně JSON podle schématu. Veškeré textové položky piš česky, pokud audio není v češtině — přesto přepis věrný originálu v poli text, summary může být česky.
 """
 
-            transcript_json = await asyncio.to_thread(
-                _vertex_generate,
-                model_name=settings.model_transcript,
-                project=settings.google_cloud_project,
-                location=settings.model_region,
-                parts=[
-                    Part.from_uri(normalized_uri, mime_type="audio/mpeg"),
-                    Part.from_text(transcript_prompt),
-                ],
-                system_instruction="Odpovídej jen platným JSON. Žádný markdown.",
-                response_schema=TRANSCRIPT_SCHEMA,
-            )
-            transcript_data = json.loads(transcript_json)
+                transcript_json = await asyncio.to_thread(
+                    _vertex_generate,
+                    model_name=settings.model_transcript,
+                    project=settings.google_cloud_project,
+                    location=settings.model_region,
+                    parts=[
+                        Part.from_uri(normalized_uri, mime_type="audio/mpeg"),
+                        Part.from_text(transcript_prompt),
+                    ],
+                    system_instruction="Odpovídej jen platným JSON. Žádný markdown.",
+                    response_schema=TRANSCRIPT_SCHEMA,
+                )
+                transcript_data = json.loads(transcript_json)
 
             segments = transcript_data.get("segments") or []
             lines = []

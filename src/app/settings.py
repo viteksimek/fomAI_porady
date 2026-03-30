@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -26,8 +27,15 @@ class Settings(BaseSettings):
     cloud_tasks_invoker_sa: str = ""
 
     model_region: str = "europe-west1"
-    model_transcript: str = "gemini-2.0-flash-001"
-    model_minutes: str = "gemini-2.0-flash-001"
+    # Ve Vertex musí existovat v MODEL_REGION. Od března 2026 Google uvádí, že 2.0-flash-001
+    # je jen pro stávající zákazníky; nové projekty mají směřovat na 2.5-flash / novější.
+    model_transcript: str = "gemini-2.5-flash"
+    model_minutes: str = "gemini-2.5-flash"
+
+    # Přepis: chirp_3 = Speech-to-Text v2 (multiregion); vertex_gemini = audio do Gemini v MODEL_REGION.
+    transcription_provider: Literal["chirp_3", "vertex_gemini"] = "chirp_3"
+    # Pro Chirp 3 použij «us» nebo «eu» (multiregion), ne europe-west1.
+    speech_region: str = "eu"
 
     api_key: str = ""
     skip_internal_oidc: bool = False

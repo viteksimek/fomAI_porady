@@ -1,5 +1,26 @@
 # Cloud Run — nejjednodušší nasazení
 
+## Nejrychlejší opakovaný deploy (jeden skript)
+
+Z kořene repa (kde je `Dockerfile`), s nainstalovaným `gcloud` a přihlášením (`gcloud auth login` + `gcloud config set project …`):
+
+```bash
+chmod +x scripts/deploy_cloud_run.sh scripts/setup_existing_cloudrun.sh
+# Jednorázově (API, IAM, bucket, env na službě) — viz níže, sekce „Už máte Cloud Run…“
+./scripts/setup_existing_cloudrun.sh PROJECT_ID NÁZEV_SLUŽBY europe-west1
+
+# Při každé změně kódu — build + nasazení nového image
+GOOGLE_CLOUD_PROJECT=PROJECT_ID ./scripts/deploy_cloud_run.sh
+```
+
+Skript [scripts/deploy_cloud_run.sh](../scripts/deploy_cloud_run.sh): Cloud Build vyrobí image a `gcloud run deploy` ho nasadí. **Služba už existuje** → aktualizuje se jen image (**env zůstane** jako v konzoli). **Služba neexistuje** → první deploy vytvoří službu s rozumným výchozím `set-env-vars` (případně pak uprav env v konzoli).
+
+_Asistent v editoru k tvému GCP nepřistupuje — příkazy musí spustit ty nebo [Cloud Shell](https://shell.cloud.google.com/) ve stejném projektu._
+
+**Máš Cloud Build trigger z GitHubu?** Repozitář si Cloud Build **naklonuje sám** při každém buildu — ruční `git clone` nepotřebuješ. Nasazení = **push do větve**, kterou trigger sleduje (viz sekce [Git → automatický build](#git--automatický-build)). Skript `deploy_cloud_run.sh` používá jen tehdy, když build spouštíš ručně z vlastního klónu.
+
+---
+
 Dvě úrovně: **A) bez Cloud Tasks** (méně kroků, vhodné na začátek) a **B) s Cloud Tasks** (odpovídá plánu, robustnější).
 
 ## Předpoklady
@@ -20,7 +41,7 @@ export AR_REPO="meeting-api"
 
 ### Už máte Cloud Run, chybí bucket / Firestore / IAM / env?
 
-V **Cloud Shell** (nebo kde máte `gcloud` s právy na projekt), z kořene klonovaného repa:
+V **Cloud Shell**, na **Macu v kořeni repa**, nebo kde máš `gcloud` s právy na projekt (po `git clone` jen když něco spouštíš ručně; u CI triggeru si repo stáhne sám Cloud Build):
 
 ```bash
 chmod +x scripts/setup_existing_cloudrun.sh
@@ -29,14 +50,14 @@ chmod +x scripts/setup_existing_cloudrun.sh
 
 Argumenty: `PROJECT_ID`, **název služby Cloud Run** (jak v konzoli), volitelně region. Skript zapne API, založí bucket `PROJECT_ID-meeting-audio` (nebo `BUCKET_NAME=…` před spuštěním), zkusí Firestore, **najde účet**, pod kterým služba běží, přidá mu role (Vertex, Firestore, Storage, …) a **doplní env** na službě (`GCS_BUCKET`, `USE_MEMORY_STORE=false`, …).
 
-**Cache u `curl`:** pokud stále hlásí chybu o `--condition=None`, ověřte `curl -sL 'https://raw.githubusercontent.com/.../setup_existing_cloudrun.sh?x=1' | head -5` — musí být řádek `rev: 2026-03-29b`. Jinak přidejte `?t=$(date +%s)` do URL.
+**Cache u `curl`:** pokud stále hlásí chybu o `--condition=None`, ověřte `curl -sL 'https://raw.githubusercontent.com/.../setup_existing_cloudrun.sh?x=1' | head -5` — musí být řádek `rev: 2026-03-30a`. Jinak přidejte `?t=$(date +%s)` do URL.
 
 **Ruční IAM** (stejné role jako skript), když skript nelze spustit:
 
 ```bash
 export PROJECT_ID=fomei2020
 export RUN_SA=635664358681-compute@developer.gserviceaccount.com   # váš účet z výpisu skriptu
-for R in roles/aiplatform.user roles/datastore.user roles/storage.objectAdmin roles/cloudtasks.enqueuer; do
+for R in roles/aiplatform.user roles/datastore.user roles/storage.objectAdmin roles/cloudtasks.enqueuer roles/speech.client; do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:${RUN_SA}" --role="$R" --condition=None --quiet
 done
 ```
@@ -166,7 +187,9 @@ A runtime účtu přidejte `roles/cloudtasks.enqueuer` (viz [GCP_SETUP.md](GCP_S
 
 Zdrojový kód: [https://github.com/viteksimek/fomAI_porady](https://github.com/viteksimek/fomAI_porady).
 
-Propojte repo s [Cloud Build Triggers](https://console.cloud.google.com/cloud-build/triggers) a použijte [cloudbuild.yaml](../cloudbuild.yaml). Po prvním deployi v konzoli **Cloud Run → vaše služba → Upravit a nasadit novou revizi** doplňte chybějící env (`GCS_BUCKET`, atd.) — šablona v `cloudbuild.yaml` nastavuje jen minimum.
+Propoj repo s [Cloud Build Triggers](https://console.cloud.google.com/cloud-build/triggers) a jako konfiguraci zvol [cloudbuild.yaml](../cloudbuild.yaml) v kořeni. **Při spuštění triggeru Cloud Build repozitář sám naklonuje** (do pracovního adresáře buildu) — v Cloud Shellu nemusíš nic klonovat jen kvůli deployi z Gitu.
+
+Typický postup: **push do sledované větve** → build → deploy podle `cloudbuild.yaml`. Jednorázově spusť [setup_existing_cloudrun.sh](../scripts/setup_existing_cloudrun.sh) (IAM, API, env na Cloud Run), aby služba měla `GCS_BUCKET`, `SPEECH_REGION`, `TRANSCRIPTION_PROVIDER` atd. — šablona v `cloudbuild.yaml` často přepisuje jen část env (`PROCESS_INLINE` atd.), zbytek doplň v konzoli nebo přes skript.
 
 ---
 
@@ -175,6 +198,8 @@ Propojte repo s [Cloud Build Triggers](https://console.cloud.google.com/cloud-bu
 **Nepřemýšlejte o limitech ručně** — klient si může vždy vyžádat `GET /v1/meta` (limity + doporučená cesta).
 
 **Standard pro libovolnou velikost** (Power Automate, skripty, …):
+
+**Import do Power Automate:** soubor [meeting-api.swagger.yaml](../integrations/power-automate/meeting-api.swagger.yaml) (OpenAPI/Swagger 2.0) lze v **Power Automate → Data → Custom connectors → Import an OpenAPI file** načíst jako konektor akcí `PrepareUpload`, `FinalizeUpload`, `GetJobStatus`, `GetMeta`. Krok **PUT** binárního souboru na `upload_url` zůstává jako samostatná akce **HTTP** (jiný host než Cloud Run).
 
 1. `POST /v1/jobs/prepare-upload` — JSON `filename`, `content_type`, volitelně `options` — odpověď obsahuje `upload_url`, `finalize_url`, `status_url` a pole **`steps`**.
 2. **PUT** raw bajtů souboru na `upload_url` (hlavička `Content-Type` jako v kroku 1).

@@ -12,7 +12,7 @@
 set -euo pipefail
 
 # Změňte při úpravách — při curl ověřte: curl -sL ... | head -5 musí obsahovat stejný řetězec
-echo "==> setup_existing_cloudrun.sh  rev: 2026-03-29b  (IAM: --condition=None)"
+echo "==> setup_existing_cloudrun.sh  rev: 2026-03-30a  (Gemini 2.5-flash v env)"
 
 PROJECT_ID="${1:-}"
 SERVICE_NAME="${2:-}"
@@ -34,6 +34,7 @@ gcloud services enable \
   storage.googleapis.com \
   firestore.googleapis.com \
   aiplatform.googleapis.com \
+  speech.googleapis.com \
   cloudbuild.googleapis.com \
   artifactregistry.googleapis.com \
   iamcredentials.googleapis.com \
@@ -69,7 +70,7 @@ fi
 grant_roles() {
   local sa="$1"
   echo "==> IAM role pro $sa …"
-  for R in roles/aiplatform.user roles/datastore.user roles/storage.objectAdmin roles/cloudtasks.enqueuer; do
+  for R in roles/aiplatform.user roles/datastore.user roles/storage.objectAdmin roles/cloudtasks.enqueuer roles/speech.client; do
     # Jedna řádka — některé prostředí špatně zpracovávají pokračování řádků u --condition=None
     gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:${sa}" --role="$R" --condition=None --quiet
   done
@@ -81,10 +82,9 @@ grant_roles() {
 }
 
 grant_roles "$RUN_SA"
-
 echo "==> Aktualizuji env proměnné na Cloud Run (doplňuje / přepisuje uvedené klíče)…"
 # Jedna řádka — čárky oddělují páry KEY=VALUE
-ENV_LINE="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GCS_BUCKET=${BUCKET_NAME},MODEL_REGION=${REGION},MODEL_TRANSCRIPT=gemini-2.0-flash-001,MODEL_MINUTES=gemini-2.0-flash-001,USE_MEMORY_STORE=false,PROCESS_INLINE=true,SKIP_INTERNAL_OIDC=true"
+ENV_LINE="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GCS_BUCKET=${BUCKET_NAME},MODEL_REGION=${REGION},SPEECH_REGION=eu,TRANSCRIPTION_PROVIDER=chirp_3,MODEL_TRANSCRIPT=gemini-2.5-flash,MODEL_MINUTES=gemini-2.5-flash,USE_MEMORY_STORE=false,PROCESS_INLINE=true,SKIP_INTERNAL_OIDC=true"
 
 gcloud run services update "$SERVICE_NAME" \
   --region="$REGION" \

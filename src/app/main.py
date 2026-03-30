@@ -33,6 +33,15 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title=get_settings().app_name, version=__version__)
 
 
+def _public_base_url(request: Request) -> str:
+    """Veřejná base URL pro odkazy v JSON (Cloud Run: HTTPS + host z X-Forwarded-*)."""
+    proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "http").split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc).split(",")[
+        0
+    ].strip()
+    return f"{proto}://{host}".rstrip("/")
+
+
 def _kickoff_processing(background_tasks: BackgroundTasks, job_id: str) -> None:
     settings = get_settings()
     if settings.process_inline:
@@ -81,7 +90,7 @@ async def _prepare_upload(request: Request, body: SignedUploadBody) -> PrepareUp
         expiration_seconds=settings.signed_url_exp_seconds,
     )
     await store.update_job(job_id, {"input_gcs_uri": dest_uri})
-    base = str(request.base_url).rstrip("/")
+    base = _public_base_url(request)
     return PrepareUploadResponse(
         job_id=job_id,
         gcs_uri=dest_uri,
@@ -119,7 +128,7 @@ async def create_job_from_gcs(
         options=body.options.model_dump(),
     )
     _kickoff_processing(background_tasks, job_id)
-    base = str(request.base_url).rstrip("/")
+    base = _public_base_url(request)
     return JobAcceptedResponse(
         job_id=job_id,
         status=JobStatus.queued.value,
@@ -172,7 +181,7 @@ async def create_job_from_upload(
     await store.update_job(job_id, {"input_gcs_uri": dest_uri})
 
     _kickoff_processing(background_tasks, job_id)
-    base = str(request.base_url).rstrip("/")
+    base = _public_base_url(request)
     return JobAcceptedResponse(
         job_id=job_id,
         status=JobStatus.queued.value,
@@ -240,7 +249,7 @@ async def finalize_upload(
 
     await store.update_job(job_id, {"status": JobStatus.queued.value, "error": None})
     _kickoff_processing(background_tasks, job_id)
-    base = str(request.base_url).rstrip("/")
+    base = _public_base_url(request)
     return JobAcceptedResponse(
         job_id=job_id,
         status=JobStatus.queued.value,
