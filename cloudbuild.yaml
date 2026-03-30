@@ -60,6 +60,7 @@ steps:
         "2",
         "--timeout",
         "3600",
+        "--no-cpu-throttling",
         "--max-instances",
         "10",
         "--set-env-vars",

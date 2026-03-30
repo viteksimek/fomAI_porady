@@ -57,7 +57,8 @@ if gcloud run services describe "$SERVICE_NAME" --region "$REGION" &>/dev/null; 
   gcloud run deploy "$SERVICE_NAME" \
     --region="$REGION" \
     --platform=managed \
-    --image="$IMAGE"
+    --image="$IMAGE" \
+    --no-cpu-throttling
 else
   echo "==> První deploy — vytvářím službu s výchozím výpočetním účtem a env (uprav v konzoli dle potřeby)."
   NUM="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
@@ -72,6 +73,7 @@ else
     --memory=2Gi \
     --cpu=2 \
     --timeout=3600 \
+    --no-cpu-throttling \
     --service-account="$RUN_SA" \
     --image="$IMAGE" \
     --set-env-vars="$ENV_VARS"

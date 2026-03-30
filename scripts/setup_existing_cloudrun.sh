@@ -12,7 +12,7 @@
 set -euo pipefail
 
 # Změňte při úpravách — při curl ověřte: curl -sL ... | head -5 musí obsahovat stejný řetězec
-echo "==> setup_existing_cloudrun.sh  rev: 2026-03-30a  (Gemini 2.5-flash v env)"
+echo "==> setup_existing_cloudrun.sh  rev: 2026-03-30b  (always-on CPU + Gemini 2.5-flash)"
 
 PROJECT_ID="${1:-}"
 SERVICE_NAME="${2:-}"
@@ -89,6 +89,11 @@ ENV_LINE="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GCS_BUCKET=${BUCKET_NAME},MODEL_REG
 gcloud run services update "$SERVICE_NAME" \
   --region="$REGION" \
   --update-env-vars="$ENV_LINE"
+
+echo "==> Zapínám always-on CPU (bez throttlingu) pro spolehlivý background processing…"
+gcloud run services update "$SERVICE_NAME" \
+  --region="$REGION" \
+  --no-cpu-throttling
 
 echo ""
 echo "-------------------------------------------------------------------"

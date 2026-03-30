@@ -50,7 +50,7 @@ chmod +x scripts/setup_existing_cloudrun.sh
 
 Argumenty: `PROJECT_ID`, **název služby Cloud Run** (jak v konzoli), volitelně region. Skript zapne API, založí bucket `PROJECT_ID-meeting-audio` (nebo `BUCKET_NAME=…` před spuštěním), zkusí Firestore, **najde účet**, pod kterým služba běží, přidá mu role (Vertex, Firestore, Storage, …) a **doplní env** na službě (`GCS_BUCKET`, `USE_MEMORY_STORE=false`, …).
 
-**Cache u `curl`:** pokud stále hlásí chybu o `--condition=None`, ověřte `curl -sL 'https://raw.githubusercontent.com/.../setup_existing_cloudrun.sh?x=1' | head -5` — musí být řádek `rev: 2026-03-30a`. Jinak přidejte `?t=$(date +%s)` do URL.
+**Cache u `curl`:** pokud stále hlásí chybu o `--condition=None`, ověřte `curl -sL 'https://raw.githubusercontent.com/.../setup_existing_cloudrun.sh?x=1' | head -5` — musí být řádek `rev: 2026-03-30b`. Jinak přidejte `?t=$(date +%s)` do URL.
 
 **Ruční IAM** (stejné role jako skript), když skript nelze spustit:
 
@@ -127,7 +127,7 @@ gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
 
 ## Varianta A — nejméně kroků (bez Cloud Tasks)
 
-Zpracování běží na instanci Cloud Run na pozadí (`PROCESS_INLINE=true`). Není potřeba fronta ani druhý účet pro OIDC.
+Zpracování běží na instanci Cloud Run na pozadí (`PROCESS_INLINE=true`). Na Cloud Run je pro to nutné mít **always-on CPU** (`--no-cpu-throttling`), jinak může job zůstat dlouho ve stavu `processing`.
 
 Z kořene repozitáře:
 
@@ -145,6 +145,7 @@ gcloud run deploy "$SERVICE_NAME" \
   --memory 2Gi \
   --cpu 2 \
   --timeout 3600 \
+  --no-cpu-throttling \
   --service-account "$SA_EMAIL" \
   --set-env-vars "\
 GOOGLE_CLOUD_PROJECT=${PROJECT_ID},\
@@ -156,6 +157,11 @@ SKIP_INTERNAL_OIDC=true"
 ```
 
 Po deployi zkopírujte URL služby z výstupu a otestujte:
+
+```bash
+gcloud run services update "$SERVICE_NAME" --region "$REGION" --no-cpu-throttling
+```
+
 
 ```bash
 curl -sS "https://YOUR-SERVICE-XXXX.run.app/health"
