@@ -129,7 +129,7 @@ def _ffprobe_duration_seconds(path: Path) -> float:
     return float((r.stdout or "0").strip() or 0.0)
 
 
-def _run_ffmpeg_normalize(src: Path, dest: Path) -> None:
+def _run_ffmpeg_normalize(src: Path, dest: Path, *, timeout_seconds: int = 1800) -> None:
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -148,10 +148,17 @@ def _run_ffmpeg_normalize(src: Path, dest: Path) -> None:
         "128k",
         str(dest),
     ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout_seconds)
 
 
-def _ffmpeg_extract_mp3_segment(src: Path, dest: Path, start_sec: float, duration_sec: float) -> None:
+def _ffmpeg_extract_mp3_segment(
+    src: Path,
+    dest: Path,
+    start_sec: float,
+    duration_sec: float,
+    *,
+    timeout_seconds: int = 1200,
+) -> None:
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -174,7 +181,7 @@ def _ffmpeg_extract_mp3_segment(src: Path, dest: Path, start_sec: float, duratio
         "128k",
         str(dest),
     ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout_seconds)
 
 
 async def _transcribe_with_chirp_maybe_chunked(
@@ -308,8 +315,11 @@ async def process_job(job_id: str) -> None:
             raw_path = tmp_path / "input.bin"
             norm_path = tmp_path / "normalized.mp3"
 
+            logger.info("ffmpeg normalize download start job_id=%s", job_id)
             await gcs.download_to_path(gcs_uri=input_uri, dest=raw_path)
+            logger.info("ffmpeg normalize start job_id=%s", job_id)
             await asyncio.to_thread(_run_ffmpeg_normalize, raw_path, norm_path)
+            logger.info("ffmpeg normalize done job_id=%s", job_id)
             await gcs.upload_file(
                 local_path=norm_path,
                 gcs_uri=normalized_uri,
@@ -416,6 +426,12 @@ V akčních bodech uveď konkrétní úkoly; vlastníka a termín vyplň jen pok
         await store.update_job(
             job_id,
             {"status": JobStatus.failed.value, "error": f"ffmpeg error: {err}"},
+        )
+    except subprocess.TimeoutExpired as e:
+        logger.exception("ffmpeg timeout for job %s", job_id)
+        await store.update_job(
+            job_id,
+            {"status": JobStatus.failed.value, "error": f"ffmpeg timeout: {str(e)}"},
         )
     except Exception as e:
         logger.exception("Pipeline failed for job %s", job_id)

@@ -49,8 +49,8 @@ curl -sS -o /dev/null -w "finalize %{http_code}\n" -X POST "$FIN" \
   -d '' \
   ${HDR_KEY[@]+"${HDR_KEY[@]}"}
 
-echo "→ čekám na stav (max ~45 min) …" >&2
-DEADLINE=$((SECONDS + 2700))
+echo "→ čekám na stav (max ~3 hod) …" >&2
+DEADLINE=$((SECONDS + 10800))
 while true; do
   if (( SECONDS > DEADLINE )); then
     echo "Timeout." >&2
