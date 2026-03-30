@@ -14,7 +14,13 @@ from vertexai.generative_models import GenerationConfig, GenerativeModel, HarmBl
 from app.jobs_store import get_jobs_store_resolved
 from app.models import JobStatus
 from app.settings import get_settings
-from app.speech_chirp import parse_speaker_count_from_gcs_uri, transcribe_gcs_chirp3
+from app.speech_chirp import (
+    CHIRP_BATCH_CHUNK_SECONDS,
+    CHIRP_BATCH_SINGLE_FILE_MAX_SECONDS,
+    merge_chirp_transcript_partials,
+    parse_speaker_count_from_gcs_uri,
+    transcribe_gcs_chirp3,
+)
 from app.storage import GcsStorage
 
 logger = logging.getLogger(__name__)
@@ -145,6 +151,93 @@ def _run_ffmpeg_normalize(src: Path, dest: Path) -> None:
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
+def _ffmpeg_extract_mp3_segment(src: Path, dest: Path, start_sec: float, duration_sec: float) -> None:
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        str(start_sec),
+        "-i",
+        str(src),
+        "-t",
+        str(duration_sec),
+        "-ac",
+        "1",
+        "-ar",
+        "44100",
+        "-c:a",
+        "libmp3lame",
+        "-b:a",
+        "128k",
+        str(dest),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
+async def _transcribe_with_chirp_maybe_chunked(
+    *,
+    job_id: str,
+    tmp_path: Path,
+    norm_path: Path,
+    normalized_uri: str,
+    duration_sec: float,
+    lang: str,
+    speaker_hint: int | None,
+    gcs: GcsStorage,
+    google_cloud_project: str,
+    speech_region: str,
+) -> dict:
+    """BatchRecognize má limit ~60 min na soubor — delší audio rozdělíme a přepisy spojíme."""
+    if duration_sec <= CHIRP_BATCH_SINGLE_FILE_MAX_SECONDS:
+        return await asyncio.to_thread(
+            transcribe_gcs_chirp3,
+            gcs_uri=normalized_uri,
+            language_hint=lang,
+            project_id=google_cloud_project,
+            speech_region=speech_region,
+            duration_seconds=duration_sec,
+            speaker_count=speaker_hint,
+        )
+
+    logger.info(
+        "Chirp: délka %.0f s přesahuje %.0f s — batch po %.0f s (job %s)",
+        duration_sec,
+        CHIRP_BATCH_SINGLE_FILE_MAX_SECONDS,
+        CHIRP_BATCH_CHUNK_SECONDS,
+        job_id,
+    )
+    partials: list[tuple[float, dict]] = []
+    start = 0.0
+    chunk_idx = 0
+    while start < duration_sec:
+        chunk_dur = min(CHIRP_BATCH_CHUNK_SECONDS, duration_sec - start)
+        chunk_path = tmp_path / f"chirp_chunk_{chunk_idx:03d}.mp3"
+        await asyncio.to_thread(_ffmpeg_extract_mp3_segment, norm_path, chunk_path, start, chunk_dur)
+        chunk_uri = gcs.job_chirp_chunk_uri(job_id, chunk_idx)
+        await gcs.upload_file(
+            local_path=chunk_path,
+            gcs_uri=chunk_uri,
+            content_type="audio/mpeg",
+        )
+        partial = await asyncio.to_thread(
+            transcribe_gcs_chirp3,
+            gcs_uri=chunk_uri,
+            language_hint=lang,
+            project_id=google_cloud_project,
+            speech_region=speech_region,
+            duration_seconds=chunk_dur,
+            speaker_count=speaker_hint,
+        )
+        partials.append((start, partial))
+        start += chunk_dur
+        chunk_idx += 1
+
+    return merge_chirp_transcript_partials(partials)
+
+
 def _vertex_generate(
     *,
     model_name: str,
@@ -226,14 +319,17 @@ async def process_job(job_id: str) -> None:
             duration_sec = await asyncio.to_thread(_ffprobe_duration_seconds, norm_path)
 
             if settings.transcription_provider == "chirp_3":
-                transcript_data = await asyncio.to_thread(
-                    transcribe_gcs_chirp3,
-                    gcs_uri=normalized_uri,
-                    language_hint=lang,
-                    project_id=settings.google_cloud_project,
+                transcript_data = await _transcribe_with_chirp_maybe_chunked(
+                    job_id=job_id,
+                    tmp_path=tmp_path,
+                    norm_path=norm_path,
+                    normalized_uri=normalized_uri,
+                    duration_sec=duration_sec,
+                    lang=lang,
+                    speaker_hint=speaker_hint,
+                    gcs=gcs,
+                    google_cloud_project=settings.google_cloud_project,
                     speech_region=settings.speech_region,
-                    duration_seconds=duration_sec,
-                    speaker_count=speaker_hint,
                 )
             else:
                 spk_line = ""

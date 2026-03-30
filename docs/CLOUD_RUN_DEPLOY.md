@@ -212,11 +212,34 @@ Starý alias: `POST /v1/uploads/signed-url` dělá totéž.
 
 V **Cloud Shellu** není váš Mac **`~/Desktop`** — soubor nejdřív **Upload** do home, pak např. `gcloud storage cp ~/SLS.m4a gs://...`.
 
+## Finální checklist před testem z Macu (Chirp + Gemini)
+
+1. **Zapnuté API v projektu** (jinak 403 u přepisu):
+   - V konzoli: [API knihovna — Speech-to-Text](https://console.cloud.google.com/apis/library/speech.googleapis.com) (vyber projekt) → **Enable**,
+   - nebo v Cloud Shell:  
+     `gcloud config set project PROJECT_ID`  
+     `gcloud services enable speech.googleapis.com`
+   - Po zapnutí počkej 1–3 minuty a job spusť znovu.
+2. **Runtime účet Cloud Run** (konfigurace služby → účet služby): má mít mimo jiné **`roles/speech.client`**, **`roles/aiplatform.user`**, **`roles/storage.objectAdmin`** — viz [setup_existing_cloudrun.sh](../scripts/setup_existing_cloudrun.sh).
+3. **Env na Cloud Run** (nejnovější revize):  
+   `TRANSCRIPTION_PROVIDER=chirp_3`, `SPEECH_REGION=eu`,  
+   `MODEL_MINUTES` / `MODEL_TRANSCRIPT` = např. **`gemini-2.5-flash`** (ne staré `gemini-2.0-flash-001`, pokud v projektu nejedete).
+4. **Test z kořene repa:**
+   ```bash
+   cd /cesta/k/klonu
+   BASE_URL="https://TVOJE-SLUZBA.run.app" ./scripts/upload_and_wait.sh "/Users/ja/Desktop/SLS.m4a"
+   ```
+   Volitelně `export API_KEY=…`, pokud ho máš na službě.
+
+**Co znamená tvoje chyba `SERVICE_DISABLED` u Speech:** API **speech.googleapis.com** v projektu **není zapnuté** (nebo ještě „nepropadlo“). Není to chyba kódu ani souboru — po **Enable** a krátké prodlevě stejný upload znovu.
+
 ## Časté problémy
 
 | Problém | Řešení |
 |--------|--------|
-| Vertex „permission denied“ | Účet `meeting-api-run` má `roles/aiplatform.user`; region `MODEL_REGION` odpovídá dostupnosti modelu. |
+| **`403` Cloud Speech-to-Text API … `SERVICE_DISABLED`** | Zapni API: [speech.googleapis.com v API Library](https://console.cloud.google.com/apis/library/speech.googleapis.com) u daného projektu, nebo `gcloud services enable speech.googleapis.com`. Po minutě opakuj job. |
+| **Chirp: „audio … too long“, max ~60 min / soubor** | Aplikace dílčí delší soubory automaticky (~55 min úseky) a spojí přepis; nasaď novou revizi služby. |
+| Vertex „permission denied“ / 404 modelu | Účet Cloud Run má `roles/aiplatform.user`; v env `MODEL_*` použij dostupný model (např. `gemini-2.5-flash`). |
 | GCS access denied | `roles/storage.objectAdmin` na projekt nebo užší role na bucket. |
 | Firestore | `USE_MEMORY_STORE=false` a vytvořená Firestore DB. |
 | Timeout | U dlouhých nahrávek už máte `--timeout 3600`; případně zvyšte paměť. |

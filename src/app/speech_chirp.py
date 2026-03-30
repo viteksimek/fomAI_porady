@@ -49,6 +49,11 @@ _ISO2_TO_BCP47: dict[str, str] = {
 # S enable_word_time_offsets u BatchRecognize + chirp platí cca 20 min limit — držíme rezervu.
 _WORD_LEVEL_MAX_SECONDS: int = 19 * 60
 
+# BatchRecognize: jeden soubor max ~60 min (chyba API „too long“). Jedna stopa pod limitem + rezerva.
+CHIRP_BATCH_SINGLE_FILE_MAX_SECONDS: float = 59 * 60
+# Délka segmentu při rozdělení (min pod 60 min).
+CHIRP_BATCH_CHUNK_SECONDS: float = 55 * 60
+
 # Hint z názvu souboru před příponou (priorita: první shoda).
 _SPEAKER_FILENAME_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"_s(\d+)(?=\.[^.]+$)", re.IGNORECASE),
@@ -183,6 +188,51 @@ def _stt_results_to_transcript_dict(
     if not summary and segments:
         summary = segments[0].get("text", "")
     return {"summary": summary or "(prázdný přepis)", "segments": segments}
+
+
+def _parse_ts_to_seconds(ts: str) -> int | None:
+    ts = (ts or "").strip()
+    if not ts:
+        return None
+    parts = ts.split(":")
+    try:
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    except ValueError:
+        return None
+    return None
+
+
+def _seconds_to_ts_str(sec: int) -> str:
+    sec = max(0, int(sec))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
+def merge_chirp_transcript_partials(partials: list[tuple[float, dict]]) -> dict:
+    """Sloučí dílčí přepisy z po sobě jdoucích úseků audia; ``float`` je offset v sekundách od začátku nahrávky."""
+    all_segments: list[dict[str, str]] = []
+    for offset_sec, d in partials:
+        for seg in d.get("segments") or []:
+            ns = {**seg}
+            t = seg.get("timestamp") or ""
+            base = _parse_ts_to_seconds(t)
+            if base is not None:
+                ns["timestamp"] = _seconds_to_ts_str(int(offset_sec) + base)
+            else:
+                ns["timestamp"] = _seconds_to_ts_str(int(offset_sec))
+            all_segments.append(ns)
+    flat = " ".join(s.get("text", "") for s in all_segments).strip()
+    summary = (flat[:900] + "…") if len(flat) > 900 else flat
+    if not summary and partials:
+        fb = " ".join((p[1].get("summary") or "") for p in partials).strip()
+        summary = (fb[:900] + "…") if len(fb) > 900 else fb
+    return {"summary": summary or "(prázdný přepis)", "segments": all_segments}
 
 
 def transcribe_gcs_chirp3(

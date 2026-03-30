@@ -126,6 +126,13 @@ class GcsStorage:
             f"{self._settings.gcs_jobs_prefix}/{job_id}/working/normalized.mp3"
         )
 
+    def job_chirp_chunk_uri(self, job_id: str, chunk_index: int) -> str:
+        """Dočasné segmenty pro Chirp BatchRecognize (limit délky jednoho souboru)."""
+        return (
+            f"gs://{self._settings.gcs_bucket}/"
+            f"{self._settings.gcs_jobs_prefix}/{job_id}/working/chunk_{chunk_index:03d}.mp3"
+        )
+
     def job_transcript_uri(self, job_id: str) -> str:
         return (
             f"gs://{self._settings.gcs_bucket}/"
